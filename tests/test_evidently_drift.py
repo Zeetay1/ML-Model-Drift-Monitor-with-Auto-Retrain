@@ -16,6 +16,12 @@ def _build_reference_and_schema():
     cfg = get_default_config()
     months = generate_all_months(cfg.data_generation)
     reference = pd.concat([months[1], months[2]], ignore_index=True)
+    # Evidently PredictionDriftMetric expects a 'prediction' column (e.g. probability).
+    reference = reference.copy()
+    reference["prediction"] = reference["label"].astype(float)
+    for m in months:
+        months[m] = months[m].copy()
+        months[m]["prediction"] = months[m]["label"].astype(float)
     schema = generate_feature_schema(cfg.data_generation)
     ground_truth_monthly = build_monthly_ground_truth(cfg.data_generation)
     return cfg, months, reference, schema, ground_truth_monthly

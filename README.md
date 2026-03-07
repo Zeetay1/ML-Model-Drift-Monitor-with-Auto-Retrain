@@ -36,16 +36,36 @@ pip install -r requirements.txt
 
 ### Project layout
 
-- `src/ml_drift_monitor/` ? core package
-- `artifacts/` ? local data, models, logs, drift reports, and MLflow store (git-ignored)
-- `tests/` ? pytest test suite
+- `src/ml_drift_monitor/` – core package (data, models, monitoring, orchestration, tracking, db, utils, dashboard)
+- `artifacts/` – local data, models, logs, drift reports, job state DB, MLflow store (git-ignored)
+- `tests/` – pytest test suite (no manual setup; data generated programmatically in fixtures)
 
-### Running tests
+### Build and test (no manual steps)
 
-From the project root, with the virtual environment activated:
+From the project root:
+
+1. `python -m venv .venv` then activate and `pip install -r requirements.txt`.
+2. Run the full test suite in one go: `pytest`
+
+All data is generated programmatically; no external services are required (MLflow/Prefect run in-process or file-backed).
+
+### Dashboard (FastAPI, no Streamlit)
+
+Serve the monitoring dashboard as minimal HTML/JS via FastAPI:
 
 ```bash
-pytest
+uvicorn ml_drift_monitor.dashboard.server:app --host 127.0.0.1 --port 8000
 ```
 
-Further details on flows, drift detection, and the dashboard are documented in the internal plan and module docstrings.
+Then open http://127.0.0.1:8000 in a browser. The dashboard reads only from persisted artifacts (drift reports, job state, event log).
+
+### Running the pipeline
+
+To process a month (e.g. month 4) and optionally trigger retrain:
+
+```python
+from ml_drift_monitor.orchestration.prefect_flows import monitor_and_retrain_flow
+monitor_and_retrain_flow(4)
+```
+
+Job state is persisted in SQLite (`artifacts/job_state.db`); cost metadata (inference time, estimated compute cost) is attached to retrain results and persisted.

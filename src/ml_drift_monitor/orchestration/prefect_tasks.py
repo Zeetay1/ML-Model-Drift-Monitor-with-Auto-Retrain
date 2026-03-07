@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Dict, Tuple
 
 import pandas as pd
@@ -8,16 +9,17 @@ from prefect import task
 from ml_drift_monitor.config import ProjectConfig, get_default_config
 from ml_drift_monitor.data.generator import generate_feature_schema
 from ml_drift_monitor.data.storage import load_month_batch
-from ml_drift_monitor.data.ground_truth import build_monthly_ground_truth
+from ml_drift_monitor.db.job_state import set_job_completed
 from ml_drift_monitor.logging_utils.logger import get_logger
 from ml_drift_monitor.models.baseline import ensure_initial_champion
 from ml_drift_monitor.models.evaluation import compute_classification_metrics
-from ml_drift_monitor.models.registry import get_current_champion, save_challenger, save_new_champion_version
+from ml_drift_monitor.models.registry import save_challenger, save_new_champion_version
 from ml_drift_monitor.models.training import predict_with_proba, train_logistic_regression
 from ml_drift_monitor.monitoring.evidently_drift import run_evidently_drift
 from ml_drift_monitor.orchestration.state_tracking import has_retrain_run_for_window
 from ml_drift_monitor.tracking.event_log import RetrainEvent, log_retrain_event, utc_now_iso
 from ml_drift_monitor.tracking.mlflow_utils import start_run
+from ml_drift_monitor.utils.cost_tracking import record_retrain_cost
 
 
 logger = get_logger()
@@ -44,6 +46,16 @@ def load_reference_data_task(cfg: ProjectConfig) -> pd.DataFrame:
 @task
 def load_current_batch_task(month: int, cfg: ProjectConfig) -> pd.DataFrame:
     return load_month_batch(month, cfg)
+
+
+@task
+def add_predictions_to_batch_task(df: pd.DataFrame, model) -> pd.DataFrame:
+    """Add 'prediction' column (positive-class probability) for Evidently prediction drift."""
+    X = df.drop(columns=["label"], errors="ignore")
+    _, proba = predict_with_proba(model, X)
+    out = df.copy()
+    out["prediction"] = proba[:, 1] if proba.ndim == 2 else proba
+    return out
 
 
 @task
@@ -106,6 +118,7 @@ def decide_and_persist_task(
 ):
     from ml_drift_monitor.config import PromotionConfig
 
+    start_time = time.perf_counter()
     prom_cfg: PromotionConfig = cfg.promotion
     metric_name = prom_cfg.metric_name
     champ_score = champion_metrics.get(metric_name, float("nan"))
@@ -148,6 +161,10 @@ def decide_and_persist_task(
             "challenger": challenger_version,
         }
 
+    inference_seconds = time.perf_counter() - start_time
+    cost_meta = record_retrain_cost(inference_seconds, cfg)
+    cost_metadata = cost_meta.to_dict()
+
     event = RetrainEvent(
         window_id=window_id,
         drift_flag=drift_report.overall_drift_flag,
@@ -157,8 +174,21 @@ def decide_and_persist_task(
         challenger_metrics=challenger_metrics,
         model_versions=model_versions,
         timestamp=utc_now_iso(),
+        cost_metadata=cost_metadata,
     )
     log_retrain_event(event, cfg)
+
+    set_job_completed(
+        window_id,
+        status="completed",
+        promotion_decision=decision,
+        champion_version=model_versions.get("champion_after") or champion_meta.get("version"),
+        challenger_version=model_versions.get("challenger"),
+        drift_flag=drift_report.overall_drift_flag,
+        retrain_triggered=True,
+        extra={"cost_metadata": cost_metadata},
+        cfg=cfg,
+    )
 
     # Log to MLflow as well.
     with start_run(run_name=f"retrain_{window_id}", cfg=cfg, tags={"window_id": window_id}) as run:

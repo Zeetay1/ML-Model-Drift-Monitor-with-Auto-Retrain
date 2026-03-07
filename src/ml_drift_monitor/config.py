@@ -15,6 +15,7 @@ class PathConfig:
     logs_dir: Path = field(init=False)
     drift_reports_dir: Path = field(init=False)
     mlflow_root: Path = field(init=False)
+    job_state_db_path: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.artifacts_root = self.project_root / "artifacts"
@@ -24,6 +25,7 @@ class PathConfig:
         self.logs_dir = self.artifacts_root / "logs"
         self.drift_reports_dir = self.artifacts_root / "drift_reports"
         self.mlflow_root = self.artifacts_root / "mlflow"
+        self.job_state_db_path = self.artifacts_root / "job_state.db"
 
 
 @dataclass
@@ -57,11 +59,19 @@ class PromotionConfig:
 
 
 @dataclass
+class CostTrackingConfig:
+    """Cost tracking for retrain runs (no LLM; use inference time + estimated compute as proxy)."""
+    estimated_compute_cost_per_retrain: float = 0.01  # e.g. USD per retrain run
+    cost_per_cpu_hour: float = 0.05  # for deriving cost from inference_seconds if needed
+
+
+@dataclass
 class ProjectConfig:
     paths: PathConfig = field(default_factory=PathConfig)
     data_generation: DataGenerationConfig = field(default_factory=DataGenerationConfig)
     drift_thresholds: DriftThresholdConfig = field(default_factory=DriftThresholdConfig)
     promotion: PromotionConfig = field(default_factory=PromotionConfig)
+    cost_tracking: CostTrackingConfig = field(default_factory=CostTrackingConfig)
 
 
 def get_default_feature_drift_specs() -> List[FeatureDriftSpec]:

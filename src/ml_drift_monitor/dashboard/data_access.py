@@ -12,10 +12,15 @@ from ml_drift_monitor.config import ProjectConfig, get_default_config
 def load_drift_reports(cfg: ProjectConfig | None = None) -> Dict[int, Dict]:
     project_cfg = cfg or get_default_config()
     reports: Dict[int, Dict] = {}
+    if not project_cfg.paths.drift_reports_dir.exists():
+        return reports
     for path in sorted(project_cfg.paths.drift_reports_dir.glob("month_*_report.json")):
         month_str = path.stem.split("_")[1]
         month = int(month_str)
         data = json.loads(path.read_text(encoding="utf-8"))
+        # pd.Series(report_dict).to_json() saves as {"0": report_dict}; use report dict.
+        if isinstance(data, dict) and "0" in data and "metrics" in data.get("0", {}):
+            data = data["0"]
         reports[month] = data
     return reports
 

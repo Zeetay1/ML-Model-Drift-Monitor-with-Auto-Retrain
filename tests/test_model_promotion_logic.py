@@ -6,8 +6,8 @@ from ml_drift_monitor.orchestration.prefect_flows import monitor_and_retrain_flo
 from ml_drift_monitor.tracking.event_log import get_all_events
 
 
-def test_promotion_and_rejection_paths_exist():
-    cfg = get_default_config()
+def test_promotion_and_rejection_paths_exist(ensure_data_and_champion):
+    cfg = ensure_data_and_champion
 
     # Run pipeline for two different drifted months to exercise both branches.
     decision_m4 = monitor_and_retrain_flow(4)

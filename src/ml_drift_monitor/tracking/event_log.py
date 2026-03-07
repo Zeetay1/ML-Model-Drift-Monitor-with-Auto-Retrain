@@ -23,6 +23,7 @@ class RetrainEvent:
     challenger_metrics: Optional[Dict[str, Any]]
     model_versions: Dict[str, Any]
     timestamp: str
+    cost_metadata: Optional[Dict[str, Any]] = None
 
 
 def _events_path(cfg: ProjectConfig) -> Path:
@@ -49,6 +50,8 @@ def get_all_events(cfg: ProjectConfig | None = None) -> List[RetrainEvent]:
             if not line.strip():
                 continue
             data = json.loads(line)
+            if "cost_metadata" not in data:
+                data["cost_metadata"] = None
             events.append(RetrainEvent(**data))
     return events
 

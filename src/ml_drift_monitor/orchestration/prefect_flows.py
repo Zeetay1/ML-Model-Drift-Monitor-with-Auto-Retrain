@@ -4,6 +4,7 @@ from prefect import flow
 
 from ml_drift_monitor.logging_utils.logger import get_logger
 from ml_drift_monitor.orchestration.prefect_tasks import (
+    add_predictions_to_batch_task,
     check_retrain_already_run_task,
     decide_and_persist_task,
     ensure_champion_task,
@@ -14,6 +15,7 @@ from ml_drift_monitor.orchestration.prefect_tasks import (
     run_drift_detection_task,
     train_challenger_task,
 )
+from ml_drift_monitor.db.job_state import set_job_completed
 from ml_drift_monitor.tracking.event_log import RetrainEvent, log_retrain_event, utc_now_iso
 
 
@@ -37,6 +39,8 @@ def monitor_and_retrain_flow(month: int) -> str:
 
     reference = load_reference_data_task(cfg)
     current = load_current_batch_task(month, cfg)
+    reference = add_predictions_to_batch_task(reference, champion_model)
+    current = add_predictions_to_batch_task(current, champion_model)
 
     drift_report = run_drift_detection_task(month, reference, current, cfg)
     if not drift_report.overall_drift_flag:
@@ -49,8 +53,13 @@ def monitor_and_retrain_flow(month: int) -> str:
             challenger_metrics=None,
             model_versions={},
             timestamp=utc_now_iso(),
+            cost_metadata=None,
         )
         log_retrain_event(event, cfg)
+        set_job_completed(
+            window_id, status="completed", promotion_decision="no_drift",
+            drift_flag=False, retrain_triggered=False, cfg=cfg,
+        )
         logger.info("No drift detected for %s. Skipping retrain.", window_id)
         return "no_drift"
 
@@ -65,8 +74,13 @@ def monitor_and_retrain_flow(month: int) -> str:
             challenger_metrics=None,
             model_versions={},
             timestamp=utc_now_iso(),
+            cost_metadata=None,
         )
         log_retrain_event(event, cfg)
+        set_job_completed(
+            window_id, status="completed", promotion_decision="skipped_already_processed",
+            drift_flag=True, retrain_triggered=False, cfg=cfg,
+        )
         logger.info("Retrain already processed for %s. Skipping.", window_id)
         return "skipped_already_processed"
 
